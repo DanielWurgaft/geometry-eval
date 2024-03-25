@@ -1,0 +1,1 @@
+ Two intersecting circles. Additionally, a straight line that extends from one of the intersection points between the circles to one of the circles' border.

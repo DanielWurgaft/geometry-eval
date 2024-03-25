@@ -1,0 +1,1 @@
+ A triangle with one of its corners located at the center of a circle. Additionally, a line extends from the triangle's corner located at the center of a circle to the side of the triangle that faces it. 

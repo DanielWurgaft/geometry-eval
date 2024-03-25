@@ -1,0 +1,1 @@
+ Two circles that have the same center, one completely inside the other. Additionally, a triangle with a corner located at the center of the circles.

@@ -1,0 +1,1 @@
+ Two lines that either extend or pass through the center of a circle, and a third line that extends from one of the two lines.

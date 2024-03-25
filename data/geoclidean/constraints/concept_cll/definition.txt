@@ -1,0 +1,1 @@
+ A circle containing two lines. Each of the lines extends from one point on the circle's border to another point on the circle's border.

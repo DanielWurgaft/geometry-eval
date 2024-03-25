@@ -1,0 +1,1 @@
+ A circle and a straight line that passes through the center of the circle and whose endpoints are on the circle's border.

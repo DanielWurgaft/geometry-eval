@@ -1,0 +1,1 @@
+ Two circles that intersect at a single point. One of the circles contains the other. Additionally, a straight line passes through both of the circles' centers.

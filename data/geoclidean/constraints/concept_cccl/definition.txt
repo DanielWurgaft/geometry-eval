@@ -1,0 +1,1 @@
+ Three intersecting circles. Among their points of intersection, one point is shared by all three circles. Additionally, one of the circles contains a line whose endpoints are on the circle's border.

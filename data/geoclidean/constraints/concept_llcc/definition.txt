@@ -1,0 +1,1 @@
+ Two circles and two lines that all intersect at a single location.

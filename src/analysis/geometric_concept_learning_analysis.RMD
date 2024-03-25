@@ -1,0 +1,376 @@
+---
+title: "Geometric concept learning analysis"
+author: "Daniel Wurgaft"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    number_sections: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: paper
+---
+# Initialization
+```{r, message=FALSE}
+rm(list=ls())
+library(here)
+library(gridExtra)
+library(yardstick)
+library(PRROC)
+library(ggpubr)
+library(tidyverse)
+library(pROC)
+library(purrr)
+library(caret)
+theme_set(theme_bw())
+```
+
+```{r, eval=FALSE}
+library(tidylog)
+```
+
+
+# Preprocessing
+
+## Functions
+```{r}
+process_df <- function(df){
+  df_proc = df %>% 
+                # correct miscoding
+                mutate(solution = case_when(
+                                    test_cond == "in" ~1,
+                                    test_cond == "close"  ~0,
+                                    test_cond == "far" ~0,
+                                  )) %>%
+                                  mutate(correct = case_when(
+                                    final_answer == solution ~ 1,
+                                    .default = 0
+                                  )) %>%
+                                  # drop non numeric answers
+                                  filter(final_answer != -1 & !is.na(final_answer)) %>%
+                                  # average across attempts per image
+                                  mutate(classify_based_on = case_when(
+                      eval_mode == "classify_fromImg" ~ "Images",
+                      eval_mode == "classify_fromDef" & inferred_definition_used == 0 ~ "Correct Def",
+                      eval_mode == "classify_fromDef" & inferred_definition_used == 1 ~ "Inferred Def",
+                      eval_mode == "classify_fromImg&Def" & inferred_definition_used == 0 ~ "Images & Correct Def",
+                      eval_mode == "classify_fromImg&Def" & inferred_definition_used == 1 ~ "Images & Inferred Def",
+                      eval_mode == "inferDef" ~ NA,
+                                  ),
+                      example_type = case_when(
+                       eval_mode == "classify_fromDef" ~ "Only Def",
+                       negative_examples == 0 ~ "pos ex",
+                       negative_examples == 1 ~ "pos+neg ex",
+                      )) %>% 
+                        mutate(classify_based_on = case_when(
+                          answer_format == "binary" ~ classify_based_on,
+                          answer_format == "cot" ~ paste0(classify_based_on, " (with ", answer_format, ")"),
+                        )) %>%
+                                  group_by(test_image, concept, test_cond, answer_format, classify_based_on,
+                                           example_type, control, model) %>% 
+                                  summarise(correct_ratio = mean(correct), 
+                                            solution = mean(solution),
+                                  answer= mean(final_answer)) 
+  return(df_proc)
+}
+```
+
+
+## Read data
+```{r, message=TRUE}
+
+basepath_elements <- "data/model_eval/elements"
+
+df_elements_raw = list.files(path=here(basepath_elements),pattern = "choices", full.names = TRUE) %>% 
+  lapply(read_csv) %>%
+  bind_rows 
+
+basepath_constraints <- "data/model_eval/constraints"
+
+df_constraints_raw = list.files(path=here(basepath_constraints), pattern = "choices",full.names = TRUE) %>% 
+  lapply(read_csv) %>% 
+  bind_rows 
+
+df_elements_claude_raw <- read_csv(here("data/model_eval/elements/claude eval/choices_classify_fromImg_binary_claude-3-opus-20240229.csv"))
+
+df_constraints_claude_raw <- read_csv(here("data/model_eval/constraints/claude eval/choices_classify_fromImg_binary_claude-3-opus-20240229.csv"))
+
+human_pilot_raw <- read_csv(here("data/pilot 0 humans/human-pilot.csv"))
+```
+
+## Process data
+```{r, message=True}
+
+df_elements_proc <-  process_df(df_elements_raw)
+                                  
+
+df_constraints_proc <-  process_df(df_constraints_raw) 
+  
+  
+df_elements_claude_proc <- process_df(df_elements_claude_raw) 
+
+df_constraints_claude_proc <- process_df(df_constraints_claude_raw) 
+  
+```
+
+```{r, echo=FALSE}
+# ------ End Preprocessing ------ #
+# ----- Run all chunks above -----#
+```
+
+# evaluate human accuracy
+
+```{r}
+human_pilot_proc = human_pilot_raw %>%
+  filter(!is.na(correct)) %>%
+  mutate(correct = as.numeric(correct)) %>%
+  summarise(correct_ratio = mean(correct),
+            correct_se = sd(correct)/sqrt(n()))
+```
+
+```{r}
+choices_classify_fromImg_binary <- read_csv(here("data/model_eval/elements/choices_classify_fromImg_binary.csv"))
+```
+
+
+# control conditions
+
+```{r}
+df_elements_control_summarise = df_elements_proc %>% ungroup() %>%
+  filter(control == 1) %>%
+  group_by(answer_format, classify_based_on,example_type) %>%
+  summarise(se=sd(correct_ratio)/sqrt(n()),
+    correct_ratio = mean(correct_ratio),
+    ) %>%
+  mutate(example_type = case_when(
+    example_type == "pos ex" ~ "Positive examples",
+    example_type == "pos+neg ex" ~ "Negative examples"
+    ))
+
+elements_control_plot =   ggplot(df_elements_control_summarise, aes(x = example_type, y = correct_ratio)) +
+  geom_bar(stat = "identity", position = "dodge", fill="lightblue") +
+  geom_errorbar(aes(ymin = correct_ratio - se, ymax = correct_ratio + se), width = 0.25, position =position_dodge(0.9)) +
+  labs(title = "Elements", x = "Test examples", y = "Accuracy")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+df_constraints_control_summarise = df_constraints_proc %>% ungroup() %>%
+  filter(control == 1) %>%
+  group_by(answer_format, classify_based_on,example_type) %>%
+  summarise(se=sd(correct_ratio)/sqrt(n()),
+    correct_ratio = mean(correct_ratio)) %>%
+  mutate(example_type = case_when(
+    example_type == "pos ex" ~ "Positive examples",
+    example_type == "pos+neg ex" ~ "Negative examples"
+    ))
+
+
+ constraints_control_plot =  ggplot(df_constraints_control_summarise,aes(x = example_type, y = correct_ratio)) +
+  geom_bar(stat = "identity", position = "dodge", fill="pink") +
+  geom_errorbar(aes(ymin = correct_ratio - se, ymax = correct_ratio + se), width = 0.25, position =position_dodge(0.9)) +
+  labs(title = "Constraints", x = "Test examples", y = "Accuracy") +
+   theme(plot.title = element_text(hjust = 0.5))
+
+
+# add both plots in grid
+grid <- grid.arrange(elements_control_plot, constraints_control_plot, ncol = 2)
+ggsave(here("data/plots/gpt4_control_conditions.png"), grid)
+```
+
+
+# compare performance across conditions
+
+## elements
+
+### overall accuracies
+```{r}
+df_elements_proc_summarise <- df_elements_proc %>% ungroup() %>%
+  filter(is.na(control) | control == 0) %>%
+  group_by(classify_based_on, answer_format) %>%
+  summarise(se=sd(correct_ratio)/sqrt(n()),
+    correct_ratio = mean(correct_ratio))
+
+# plot ggplot across classify_based_on
+gpt4_elements_overall_accuracies = df_elements_proc_summarise %>% 
+  ggplot(aes(x = classify_based_on, y = correct_ratio, fill=answer_format)) +
+  geom_bar(stat = "identity", position = "dodge", fill="lightblue") +
+  geom_errorbar(aes(ymin = correct_ratio - se, ymax = correct_ratio + se), width = 0.25, position =position_dodge(0.9)) +
+  labs(title = "Elements", x = "Classify based on", y = "Accuracy")+
+  theme(plot.title = element_text(hjust = 0.5))+
+ theme(axis.text.x = element_text(size=7, angle=5))
+```
+
+```{r}
+df_elements_pr <- df_elements_proc %>%
+  filter(is.na(control) | control == 0) %>%
+  group_by(classify_based_on)
+
+auc_by_group <- df_elements_pr %>%
+  group_by(classify_based_on) %>%
+  summarise(auc = pr.curve(weights.class0=solution, scores.class0 =answer)$auc.integral)
+auc_by_group[nrow(auc_by_group) + 1,] = list("Baseline", 0.333333333333)
+
+
+# plot auc by group as bar plot
+
+PR_AUC_elements = ggplot(auc_by_group, aes(x = classify_based_on, y = auc)) +
+  geom_bar(stat = "identity", fill="lightblue") +
+  labs(title = "Elements", x = "Classify based on", y = "PR-AUC")+
+  theme(plot.title = element_text(hjust = 0.5))+
+ theme(axis.text.x = element_text(size=6, angle=8))
+```
+
+
+
+### across conditions
+
+```{r}
+df_elements_proc_summarise <- df_elements_proc %>% ungroup() %>%
+  filter(is.na(control) | control == 0) %>%
+  group_by(test_cond, classify_based_on) %>%
+  summarise(se=sd(correct_ratio)/sqrt(n()),
+    correct_ratio = mean(correct_ratio))
+
+# plot barplot with ggplot across test_cond, classify_based_on
+
+gpt4_elements_accuracies_across_conditions = df_elements_proc_summarise %>% 
+  ggplot(aes(x = test_cond, y = correct_ratio, fill = classify_based_on)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_errorbar(aes(ymin = correct_ratio - se, ymax = correct_ratio + se), width = 0.25, position =position_dodge(0.9)) +
+  labs(title = "Elements", x = "Test condition", y = "Accuracy")+
+  theme(plot.title = element_text(hjust = 0.5)) + guides(fill=guide_legend(title="Classify based on"))
+
+```
+
+## constraints
+
+### overall accuracies
+```{r}
+df_constraints_proc_summarise <- df_constraints_proc %>% ungroup() %>%
+  filter(is.na(control) | control ==0) %>%
+  group_by(classify_based_on) %>%
+  summarise(se=sd(correct_ratio)/sqrt(n()),
+    correct_ratio = mean(correct_ratio))
+
+# plot ggplot across classify_based_on
+gpt4_constraints_overall_accuracies = df_constraints_proc_summarise %>% 
+  ggplot(aes(x = classify_based_on, y = correct_ratio)) +
+  geom_bar(stat = "identity", position = "dodge",fill="lightblue") +
+  geom_errorbar(aes(ymin = correct_ratio - se, ymax = correct_ratio + se), width = 0.25, position =position_dodge(0.9)) +
+  labs(title = "Constraints", x = "Classify based on", y = "Accuracy")+
+  theme(plot.title = element_text(hjust = 0.5))+ theme(axis.text.x = element_text(size=7, angle=5))
+
+```
+
+```{r}
+df_constraints_pr <- df_constraints_proc %>%
+  filter(is.na(control) | control == 0) %>%
+  group_by(classify_based_on)
+
+
+auc_by_group <- df_constraints_pr %>%
+  group_by(classify_based_on) %>%
+  summarise(auc = pr.curve(weights.class0=solution, scores.class0 =answer)$auc.integral)
+auc_by_group[nrow(auc_by_group) + 1,] = list("Baseline", 0.333333333333)
+
+
+# plot auc by group as bar plot
+
+PR_AUC_constraints = ggplot(auc_by_group, aes(x = classify_based_on, y = auc)) +
+  geom_bar(stat = "identity", fill="lightblue") +
+  labs(title = "Constraints", x = "Classify based on", y = "PR-AUC")+
+  theme(plot.title = element_text(hjust = 0.5))+
+ theme(axis.text.x = element_text(size=6, angle=8))
+```
+
+
+### across conditions
+
+```{r}
+df_constraints_proc_summarise <- df_constraints_proc %>% ungroup() %>%
+  filter(is.na(control) | control == 0) %>%
+  group_by(test_cond, classify_based_on) %>%
+  summarise(se=sd(correct_ratio)/sqrt(n()),
+    correct_ratio = mean(correct_ratio))
+
+# plot barplot with ggplot across test_cond, classify_based_on
+
+gpt4_constraints_accuracies_across_conditions = df_constraints_proc_summarise %>% 
+  ggplot(aes(x = test_cond, y = correct_ratio, fill = classify_based_on)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_errorbar(aes(ymin = correct_ratio - se, ymax = correct_ratio + se), width = 0.25, position =position_dodge(0.9)) +
+  labs(title = "Constraints", x = "Test condition", y = "Accuracy") + guides(fill=guide_legend(title="Classify based on"))+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+
+# evaluate Claude
+```{r}
+df_claude_elements_summarise <- df_elements_claude_proc %>% ungroup() %>%
+  filter(is.na(control) | control == 0) %>%
+  group_by(classify_based_on, test_cond) %>%
+  summarise(se=sd(correct_ratio)/sqrt(n()),
+    correct_ratio = mean(correct_ratio))
+
+# plot ggplot across test_cond
+claude_elements_fig = df_claude_elements_summarise %>% 
+  ggplot(aes(x = test_cond, y = correct_ratio)) +
+  geom_bar(stat = "identity", position = "dodge", fill="lightblue") +
+  geom_errorbar(aes(ymin = correct_ratio - se, ymax = correct_ratio + se), width = 0.25, position =position_dodge(0.9)) +
+  labs(title = "Elements", x = "Test condition", y = "Accuracy") + guides(fill=guide_legend(title="Classify based on"))+  theme(plot.title = element_text(hjust = 0.5))
+
+
+df_claude_constraints_summarise <- df_constraints_claude_proc %>% ungroup() %>%
+  filter(is.na(control) | control == 0) %>%
+  group_by(classify_based_on, test_cond) %>%
+  summarise(se=sd(correct_ratio)/sqrt(n()),
+    correct_ratio = mean(correct_ratio))
+
+# plot ggplot across test_cond
+
+claude_constraints_fig = df_claude_constraints_summarise %>% 
+  ggplot(aes(x = test_cond, y = correct_ratio)) +
+  geom_bar(stat = "identity", position = "dodge", fill="lightblue") +
+  geom_errorbar(aes(ymin = correct_ratio - se, ymax = correct_ratio + se), width = 0.25, position =position_dodge(0.9)) +
+  labs(title = "Constraints", x = "Test condition", y = "Accuracy") + guides(fill=guide_legend(title="Classify based on"))+  theme(plot.title = element_text(hjust = 0.5))
+
+
+# save plots
+ggarrange(claude_elements_fig, claude_constraints_fig, ncol = 2)
+ggsave(here("data/plots/claude_accuracies.png"))
+
+```
+
+# saving plots
+
+## saving total accuracy plots
+```{r}
+# make grid of plots
+ggarrange(gpt4_elements_overall_accuracies, gpt4_constraints_overall_accuracies, ncol = 2)
+# save plot
+ggsave(here("data/plots/overall_accuracies.png"))
+
+```
+# save across conditions plots
+```{r}
+# make grid of plots
+ggarrange(gpt4_elements_accuracies_across_conditions, gpt4_constraints_accuracies_across_conditions, ncol = 2, common.legend = TRUE)
+
+# save plot
+ggsave(here("data/plots/accuracies_across_conditions.png"))
+
+```
+```{r}
+# make grid of plots
+ggarrange(PR_AUC_elements, PR_AUC_constraints, ncol = 2, common.legend = TRUE)
+
+# save plot
+ggsave(here("data/plots/PR_AUC.png"))
+```
+
+# Session Info
+```{r}
+sessionInfo()
+```
+

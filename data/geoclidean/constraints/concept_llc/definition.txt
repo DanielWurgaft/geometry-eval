@@ -1,0 +1,1 @@
+ A circle and two lines that meet. One of the lines extends from the circle's border and the other line passes through the circle's center.

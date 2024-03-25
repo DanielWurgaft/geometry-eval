@@ -1,0 +1,1 @@
+ Two intersecting circles. Additionally, there is a triangle with two corners located at the intersection points between the circles and a third corner on one of the circles' border.

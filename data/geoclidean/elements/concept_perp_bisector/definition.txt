@@ -1,0 +1,1 @@
+ Two line segments that intersect at a 90 degree angle and are cut into two equal parts.

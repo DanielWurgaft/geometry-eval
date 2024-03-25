@@ -1,0 +1,1 @@
+ A triangle, as well as two additional straight lines that intersect at one of its corners.

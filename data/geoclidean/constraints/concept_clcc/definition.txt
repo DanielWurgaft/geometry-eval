@@ -1,0 +1,1 @@
+ A circle that contains a straight line whose endpoints are on the border of that circle. Two other circles that intersect with the first circle.

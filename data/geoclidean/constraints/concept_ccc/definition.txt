@@ -1,0 +1,1 @@
+ Three intersecting circles. Among their points of intersection, one point is shared by all three circles.
